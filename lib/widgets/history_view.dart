@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../logic/pairing.dart';
 import '../models/round_result.dart';
 import '../theme/colors.dart';
 import 'app_card.dart';
@@ -48,7 +49,7 @@ class HistoryView extends StatelessWidget {
                   if (r.byeName != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 3),
-                      child: Text('${r.byeName} had a bye (+3 pts)',
+                      child: Text('${r.byeName} had a bye (+$byePoints pt${byePoints == 1 ? '' : 's'})',
                           style: const TextStyle(
                               fontSize: 13, color: Color(0xFF9A9583))),
                     ),

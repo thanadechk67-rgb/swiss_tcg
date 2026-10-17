@@ -1,5 +1,10 @@
 import '../models/player.dart';
 
+// Scoring rules — change them here and the whole app follows.
+const int winPoints = 3;
+const int drawPoints = 1;
+const int byePoints = 1; // deliberately less than a win
+
 int calcRounds(int n) {
   if (n < 2) return 0;
   if (n <= 8) return 3;
@@ -18,8 +23,7 @@ class PairingResult {
 }
 
 PairingResult pairRound(List<Player> players) {
-  final sorted = [...players]
-    ..sort((a, b) {
+  final sorted = [...players]..sort((a, b) {
       final c = b.points.compareTo(a.points);
       return c != 0 ? c : a.id.compareTo(b.id);
     });

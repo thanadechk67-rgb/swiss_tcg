@@ -30,7 +30,10 @@ class _TournamentScreenState extends State<TournamentScreen> {
   int manualRounds = 4;
 
   // Editable player names for the setup screen.
+  // The roster only ever grows (or loses a name when you press ✕), so lowering
+  // the player count never throws typed names away.
   List<TextEditingController> nameControllers = [];
+  final TextEditingController countController = TextEditingController(text: '16');
 
   List<Player> players = [];
   int currentRound = 1;
@@ -56,11 +59,15 @@ class _TournamentScreenState extends State<TournamentScreen> {
     for (final c in nameControllers) {
       c.dispose();
     }
+    countController.dispose();
     super.dispose();
   }
 
   // ---------- Persistence ----------
   Future<void> _restore() async {
+    final roster = await TournamentStorage.loadRoster();
+    if (roster != null) _applyRoster(roster);
+
     final data = await TournamentStorage.load();
     if (data == null) {
       setState(() => _loading = false);
@@ -93,6 +100,7 @@ class _TournamentScreenState extends State<TournamentScreen> {
             .map((j) => RoundResult.fromJson(j as Map<String, dynamic>))
             .toList();
         _syncNameControllers();
+        countController.text = playerCount.toString();
         _loading = false;
       });
     } catch (_) {
@@ -116,22 +124,59 @@ class _TournamentScreenState extends State<TournamentScreen> {
     );
   }
 
-  // ---------- Setup: editable names ----------
+  // ---------- Setup: editable names (roster) ----------
+  /// Grow-only: adds default-named controllers until there is one per player.
+  /// Never disposes anything when the count goes down.
   void _syncNameControllers() {
     while (nameControllers.length < playerCount) {
       nameControllers
           .add(TextEditingController(text: 'Player ${nameControllers.length + 1}'));
     }
-    while (nameControllers.length > playerCount) {
-      nameControllers.removeLast().dispose();
-    }
   }
 
-  void _setPlayerCount(int n) {
+  void _applyRoster(Map<String, dynamic> roster) {
+    final names = (roster['names'] as List).cast<String>();
+    for (int i = 0; i < names.length; i++) {
+      if (i < nameControllers.length) {
+        nameControllers[i].text = names[i];
+      } else {
+        nameControllers.add(TextEditingController(text: names[i]));
+      }
+    }
+    final count = roster['count'] as int;
+    playerCount = count < 2 ? 2 : count;
+    _syncNameControllers();
+    countController.text = playerCount.toString();
+  }
+
+  void _saveRoster() {
+    TournamentStorage.saveRoster(
+      names: nameControllers.map((c) => c.text).toList(),
+      count: playerCount,
+    );
+  }
+
+  void _setPlayerCount(int n, {bool updateField = true}) {
     setState(() {
       playerCount = n < 2 ? 2 : n;
       _syncNameControllers();
+      if (updateField) countController.text = playerCount.toString();
     });
+    _saveRoster();
+  }
+
+  /// Late arrival: bring back a hidden name if there is one, else add a new row.
+  void _addPlayer() => _setPlayerCount(playerCount + 1);
+
+  /// Removes one specific person (e.g. someone who isn't coming after all).
+  void _removePlayerAt(int i) {
+    if (playerCount <= 2) return;
+    setState(() {
+      nameControllers.removeAt(i).dispose();
+      playerCount -= 1;
+      countController.text = playerCount.toString();
+    });
+    _saveRoster();
   }
 
   // ---------- Tournament flow ----------
@@ -184,21 +229,21 @@ class _TournamentScreenState extends State<TournamentScreen> {
       final res = results[idx];
       String summary;
       if (res == 'draw') {
-        byId[a.id]!.points += 1;
-        byId[b.id]!.points += 1;
+        byId[a.id]!.points += drawPoints;
+        byId[b.id]!.points += drawPoints;
         summary = '${a.name} vs ${b.name} — Draw';
       } else if (res == a.id) {
-        byId[a.id]!.points += 3;
+        byId[a.id]!.points += winPoints;
         summary = '${a.name} vs ${b.name} — ${a.name} wins';
       } else {
-        byId[b.id]!.points += 3;
+        byId[b.id]!.points += winPoints;
         summary = '${a.name} vs ${b.name} — ${b.name} wins';
       }
       summaries.add(summary);
     }
 
     if (byePlayer != null) {
-      byId[byePlayer!.id]!.points += 3;
+      byId[byePlayer!.id]!.points += byePoints;
       byId[byePlayer!.id]!.hadBye = true;
     }
 
@@ -299,8 +344,8 @@ class _TournamentScreenState extends State<TournamentScreen> {
         elevation: 0,
         scrolledUnderElevation: 1,
         centerTitle: false,
-        title: const Row(
-          children: [
+        title: Row(
+          children: const [
             Icon(Icons.sports_kabaddi, color: felt, size: 20),
             SizedBox(width: 8),
             Text('Swiss Pairings',
@@ -351,12 +396,30 @@ class _TournamentScreenState extends State<TournamentScreen> {
             children: [
               const FieldLabel('NUMBER OF PLAYERS'),
               const SizedBox(height: 8),
-              TextFormField(
-                initialValue: playerCount.toString(),
-                keyboardType: TextInputType.number,
-                style: const TextStyle(fontSize: 20),
-                decoration: fieldDecoration(),
-                onChanged: (v) => _setPlayerCount(int.tryParse(v) ?? 2),
+              Row(
+                children: [
+                  _stepButton(Icons.remove,
+                      playerCount > 2 ? () => _setPlayerCount(playerCount - 1) : null),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: countController,
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 20),
+                      decoration: fieldDecoration(),
+                      onChanged: (v) {
+                        // Ignore empty / <2 while typing so the roster is never
+                        // shrunk by a half-typed number like "1" on the way to "18".
+                        final n = int.tryParse(v);
+                        if (n == null || n < 2) return;
+                        _setPlayerCount(n, updateField: false);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _stepButton(Icons.add, () => _setPlayerCount(playerCount + 1)),
+                ],
               ),
               const SizedBox(height: 20),
               const FieldLabel('ROUND COUNT'),
@@ -418,18 +481,40 @@ class _TournamentScreenState extends State<TournamentScreen> {
             children: [
               const FieldLabel('PLAYER NAMES (optional)'),
               const SizedBox(height: 10),
-              for (int i = 0; i < nameControllers.length; i++)
+              for (int i = 0; i < playerCount; i++)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: TextFormField(
+                    key: ObjectKey(nameControllers[i]),
                     controller: nameControllers[i],
                     style: const TextStyle(fontSize: 14),
+                    onChanged: (_) => _saveRoster(),
                     decoration: fieldDecoration().copyWith(
                       isDense: true,
                       prefixText: '${i + 1}.  ',
+                      suffixIcon: playerCount > 2
+                          ? IconButton(
+                              tooltip: 'Remove',
+                              icon: const Icon(Icons.close, size: 18),
+                              color: const Color(0xFF9A9583),
+                              onPressed: () => _removePlayerAt(i),
+                            )
+                          : null,
                     ),
                   ),
                 ),
+              OutlinedButton.icon(
+                onPressed: _addPlayer,
+                icon: const Icon(Icons.person_add_alt_1, size: 18),
+                label: const Text('Add player (late arrival)'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: felt,
+                  side: const BorderSide(color: felt),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
             ],
           ),
         ),
@@ -449,6 +534,24 @@ class _TournamentScreenState extends State<TournamentScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _stepButton(IconData icon, VoidCallback? onTap) {
+    return SizedBox(
+      width: 44,
+      height: 44,
+      child: OutlinedButton(
+        onPressed: onTap,
+        style: OutlinedButton.styleFrom(
+          padding: EdgeInsets.zero,
+          foregroundColor: felt,
+          side: const BorderSide(color: lineColor),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        child: Icon(icon, size: 20),
+      ),
     );
   }
 
@@ -514,7 +617,7 @@ class _TournamentScreenState extends State<TournamentScreen> {
                   child: Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      '${byePlayer!.name} draws a bye this round (+3 pts)',
+                      '${byePlayer!.name} draws a bye this round (+$byePoints pt${byePoints == 1 ? '' : 's'})',
                       style: const TextStyle(
                           fontSize: 13, color: Color(0xFF7A7563)),
                     ),

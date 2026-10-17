@@ -10,6 +10,30 @@ import '../models/tournament_record.dart';
 class TournamentStorage {
   static const _key = 'swiss_tournament_state';
   static const _archiveKey = 'swiss_tournament_archive';
+  static const _rosterKey = 'swiss_roster';
+
+  // ---------- Roster (player names typed on the setup screen) ----------
+  // Kept separately from the tournament state so names survive changing the
+  // player count, closing the app, and starting a new tournament.
+
+  static Future<void> saveRoster({
+    required List<String> names,
+    required int count,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_rosterKey, jsonEncode({'names': names, 'count': count}));
+  }
+
+  static Future<Map<String, dynamic>?> loadRoster() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_rosterKey);
+    if (raw == null) return null;
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
 
   // ---------- In-progress tournament (single slot) ----------
 
