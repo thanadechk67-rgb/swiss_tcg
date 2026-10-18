@@ -3,7 +3,7 @@ import '../models/player.dart';
 // Scoring rules — change them here and the whole app follows.
 const int winPoints = 3;
 const int drawPoints = 1;
-const int byePoints = 1; // deliberately less than a win
+const int byePoints = 2; // less than a win (3), more than a draw (1)
 
 int calcRounds(int n) {
   if (n < 2) return 0;
